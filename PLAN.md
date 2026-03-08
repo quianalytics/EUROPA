@@ -22,7 +22,10 @@
    - OverTheCap scraper -> CSV in `LIVE_DATA_DIR` (`live_data`)
 6. OTC completion can be fetched via `/api/scrape/overthecap/teams/<job_id>/download` as gzip.
 7. Scheduler jobs (`/api/schedules`) trigger repeat calls to the same job manager pipeline.
+- OTC artifact filename is fixed to `live_NFL_cap_tables.csv` in `live_data`.
 - OTC rows can now include flattened player fields (`player_position`, `player_age`, `player_contract`, etc., depending on site data availability) from linked player pages.
+- OTC team discovery now includes a 32-team fallback URL seed and optional `enable_team_fallback` toggle.
+- Scheduler default timezone moved to `America/New_York`; OTC schedule can be set as a daily 4:00 AM ET cron job via `/api/schedules`.
 
 ## Current files
 

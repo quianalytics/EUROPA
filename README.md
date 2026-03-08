@@ -55,6 +55,7 @@ make install
   - Body:
     - `seed_url` (optional, default `https://overthecap.com/`)
     - `max_pages` (optional)
+    - `enable_team_fallback` (optional, default `true`) when discovery misses teams
     - `include_player_details` (optional, default `true`)
     - `player_detail_limit` (optional, max unique player profile pages to fetch)
     - `user_agent` (optional)
@@ -67,11 +68,13 @@ make install
 
 - `GET /api/scrape/overthecap/teams/<job_id>/download`
   - Returns gzip compressed CSV artifact for OTC jobs.
+  - Saved file name for OTC artifacts: `live_NFL_cap_tables.csv`
+  - Leave `max_pages` unset to attempt all 32 team pages in one run.
 
 OTC one-liner (from another terminal):
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
+curl -X POST http://127.0.0.1:5001/api/scrape/overthecap/teams \
   -H "Content-Type: application/json" \
   -d '{"seed_url":"https://overthecap.com/","max_pages":5,"include_player_details":true}'
 ```
@@ -79,7 +82,7 @@ curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
 Disable player detail enrichment for a faster, salary-only run:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
+curl -X POST http://127.0.0.1:5001/api/scrape/overthecap/teams \
   -H "Content-Type: application/json" \
   -d '{"seed_url":"https://overthecap.com/","max_pages":5,"include_player_details":false}'
 ```
@@ -87,7 +90,7 @@ curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
 If discovery misses pages, pass exact `team_urls`:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
+curl -X POST http://127.0.0.1:5001/api/scrape/overthecap/teams \
   -H "Content-Type: application/json" \
   -d '{"team_urls":["https://overthecap.com/teams/buf/team-caps","https://overthecap.com/teams/nyj/team-caps"]}'
 ```
@@ -117,16 +120,29 @@ curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
   "trigger": "cron",
   "scraper_payload": {
     "type": "overthecap_team_csv",
-    "max_pages": 10
+    "include_player_details": true,
+    "enable_team_fallback": true
   },
   "cron": {
-    "hour": "3",
+    "hour": "4",
     "minute": "0"
   }
 }
 ```
 
+Create/replace this schedule now:
+
+```bash
+curl -X POST http://127.0.0.1:5001/api/schedules \
+  -H "Content-Type: application/json" \
+  -d '{"name":"daily-overthecap","trigger":"cron","scraper_payload":{"type":"overthecap_team_csv","include_player_details":true,"enable_team_fallback":true},"cron":{"hour":"4","minute":"0"}}'
+```
+
+If running 3rd party tooling uses UTC internally, keep timezone set in `.env` as:
+`SCHEDULER_TIMEZONE=America/New_York`
+
 ## Notes
 
 - OTC CSV files are written to `live_data/`.
+- OTC CSV file name is fixed to `live_NFL_cap_tables.csv` for each run (overwritten on each new OTC job).
 - Download endpoint returns gzip-compressed CSV (`application/gzip`) to reduce transfer size.

@@ -15,13 +15,48 @@ from warroom_backend.utils import utc_now
 class OverTheCapTeamScraper(BaseScraper):
     name = "overthecap_team_csv"
     BASE_URL = "https://overthecap.com"
+    TEAM_FALLBACK_TEAMS = [
+        ("arizona-cardinals", "ari"),
+        ("atlanta-falcons", "atl"),
+        ("baltimore-ravens", "bal"),
+        ("buffalo-bills", "buf"),
+        ("carolina-panthers", "car"),
+        ("chicago-bears", "chi"),
+        ("cincinnati-bengals", "cin"),
+        ("cleveland-browns", "cle"),
+        ("dallas-cowboys", "dal"),
+        ("denver-broncos", "den"),
+        ("detroit-lions", "det"),
+        ("green-bay-packers", "gb"),
+        ("houston-texans", "hou"),
+        ("indianapolis-colts", "ind"),
+        ("jacksonville-jaguars", "jax"),
+        ("kansas-city-chiefs", "kc"),
+        ("las-vegas-raiders", "lv"),
+        ("los-angeles-chargers", "lac"),
+        ("los-angeles-rams", "lar"),
+        ("miami-dolphins", "mia"),
+        ("minnesota-vikings", "min"),
+        ("new-england-patriots", "ne"),
+        ("new-orleans-saints", "no"),
+        ("new-york-giants", "nyg"),
+        ("new-york-jets", "nyj"),
+        ("philadelphia-eagles", "phi"),
+        ("pittsburgh-steelers", "pit"),
+        ("san-francisco-49ers", "sf"),
+        ("seattle-seahawks", "sea"),
+        ("tampa-bay-buccaneers", "tb"),
+        ("tennessee-titans", "ten"),
+        ("washington-commanders", "wsh"),
+    ]
 
     def run(self, params: Dict[str, Any], timeout: int) -> ScrapeResult:
         user_agent = params.get("user_agent")
         seed_url = params.get("seed_url", f"{self.BASE_URL}/").strip() or f"{self.BASE_URL}/"
         max_pages = self._to_int(params.get("max_pages"))
         explicit_pages = params.get("team_urls")
-        include_player_details = self._to_bool(params.get("include_player_details"), default=False)
+        enable_fallback_teams = self._to_bool(params.get("enable_team_fallback"), default=True)
+        include_player_details = self._to_bool(params.get("include_player_details"), default=True)
         player_detail_limit = self._to_int(params.get("player_detail_limit"))
 
         headers = {"User-Agent": user_agent or "WarRoomScraper/1.0"}
@@ -29,6 +64,9 @@ class OverTheCapTeamScraper(BaseScraper):
             page_urls = [str(url).strip() for url in explicit_pages if str(url).strip()]
         else:
             page_urls = self._collect_team_urls(seed_url, headers, timeout)
+            if enable_fallback_teams:
+                fallback = self._collect_team_fallback_urls(seed_url)
+                page_urls = self._merge_urls(page_urls, fallback)
             if not page_urls:
                 page_urls = [seed_url]
 
@@ -42,20 +80,27 @@ class OverTheCapTeamScraper(BaseScraper):
         player_cache: Dict[str, Dict[str, Any]] = {}
         all_rows: List[Dict[str, Any]] = []
         for page_url in page_urls:
-            response = requests.get(page_url, timeout=timeout, headers=headers)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, "html.parser")
-            all_rows.extend(
-                self._extract_team_table_rows(
-                    page_url,
-                    soup,
-                    headers=headers,
-                    timeout=timeout,
-                    include_player_details=include_player_details,
-                    player_detail_limit=player_detail_limit,
-                    player_cache=player_cache,
+            try:
+                response = requests.get(page_url, timeout=timeout, headers=headers)
+                response.raise_for_status()
+            except Exception:
+                continue
+
+            try:
+                soup = BeautifulSoup(response.text, "html.parser")
+                all_rows.extend(
+                    self._extract_team_table_rows(
+                        page_url,
+                        soup,
+                        headers=headers,
+                        timeout=timeout,
+                        include_player_details=include_player_details,
+                        player_detail_limit=player_detail_limit,
+                        player_cache=player_cache,
+                    )
                 )
-            )
+            except Exception:
+                continue
 
         return ScrapeResult(
             source="overthecap",
@@ -83,6 +128,17 @@ class OverTheCapTeamScraper(BaseScraper):
 
         return normalized
 
+    def _merge_urls(self, first: List[str], second: List[str]) -> List[str]:
+        merged: List[str] = []
+        seen = set()
+        for value in first + second:
+            if not value:
+                continue
+            if value not in seen:
+                seen.add(value)
+                merged.append(value)
+        return merged
+
     def _collect_team_urls(self, home_url: str, headers: Dict[str, str], timeout: int) -> List[str]:
         response = requests.get(home_url, timeout=timeout, headers=headers)
         response.raise_for_status()
@@ -106,6 +162,26 @@ class OverTheCapTeamScraper(BaseScraper):
 
         return discovered
 
+    def _collect_team_fallback_urls(self, seed_url: str) -> List[str]:
+        fallback: List[str] = []
+        seen = set()
+        for slug, abbr in self.TEAM_FALLBACK_TEAMS:
+            candidate = self._to_absolute(seed_url, f"/salary-cap/{slug}")
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            fallback.append(candidate)
+            alt = self._to_absolute(seed_url, f"/teams/{abbr}/team-caps")
+            if alt and alt not in seen:
+                seen.add(alt)
+                fallback.append(alt)
+        for _, abbr in self.TEAM_FALLBACK_TEAMS:
+            candidate = self._to_absolute(seed_url, f"/teams/{abbr}/team-caps")
+            if candidate and candidate not in seen:
+                seen.add(candidate)
+                fallback.append(candidate)
+        return fallback
+
     def _is_team_url(self, candidate: str, path: str, anchor_label: str) -> bool:
         if not path:
             return False
@@ -115,12 +191,16 @@ class OverTheCapTeamScraper(BaseScraper):
         normalized = path.rstrip("/")
         if normalized in ("/", "/salary-cap", "/salary"):
             return False
-        if normalized.startswith("/salary-cap/"):
-            # OTC links follow /salary-cap/<team-slug>
-            parts = [part for part in normalized.split("/") if part]
-            return len(parts) == 2 and parts[0] == "salary-cap"
-        if normalized.startswith("/team/") or normalized.startswith("/teams/"):
+        if normalized.count("/") == 2 and "/salary-cap/" in normalized:
             return True
+        if "/team/" in normalized or "/teams/" in normalized:
+            return True
+        if normalized.startswith("/salary-cap/"):
+            # OTC links usually look like /salary-cap/<team-slug>
+            parts = [part for part in normalized.split("/") if part]
+            if len(parts) == 2 and parts[0] == "salary-cap":
+                return True
+            return any(term in normalized for term in ("/team-caps", "/team/"))
         if any(word in anchor_label for word in ("team", "cap", "salary")):
             return True
         return False

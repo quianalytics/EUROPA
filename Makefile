@@ -3,11 +3,11 @@
 PYTHON := .venv/bin/python
 PIP := .venv/bin/pip
 HOST ?= 127.0.0.1
-PORT ?= 5000
+PORT ?= 5001
 
 run:
 	@echo "Starting WarRoom backend on http://$(HOST):$(PORT)"
-	@$(PYTHON) app.py
+	@HOST=$(HOST) PORT=$(PORT) $(PYTHON) app.py
 
 run-debug:
 	@echo "Starting WarRoom backend (debug) on http://$(HOST):$(PORT)"

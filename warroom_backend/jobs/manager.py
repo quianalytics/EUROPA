@@ -58,7 +58,15 @@ class JobManager:
             appwrite_written = self.appwrite.write_records(payloads)
 
             if result.artifact_kind == "csv":
-                artifact = self.storage.write_csv(job_id, result.items, base_name=result.artifact_name_hint)
+                artifact_name = None
+                if result.source == "overthecap":
+                    artifact_name = "live_NFL_cap_tables.csv"
+                artifact = self.storage.write_csv(
+                    job_id,
+                    result.items,
+                    base_name=result.artifact_name_hint,
+                    filename=artifact_name,
+                )
                 artifact_dir = "live_data"
             else:
                 artifact_payload = {

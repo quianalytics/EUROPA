@@ -17,7 +17,7 @@ class Settings:
         self.scraper_timeout: int = int(os.getenv("SCRAPER_TIMEOUT", "15"))
         self.upload_dir: Path = Path(os.getenv("UPLOAD_DIR", "./files")).resolve()
         self.live_data_dir: Path = Path(os.getenv("LIVE_DATA_DIR", "./live_data")).resolve()
-        self.scheduler_timezone: str = os.getenv("SCHEDULER_TIMEZONE", "UTC")
+        self.scheduler_timezone: str = os.getenv("SCHEDULER_TIMEZONE", "America/New_York")
 
         self.appwrite_endpoint: str = os.getenv("APPWRITE_ENDPOINT", "").strip()
         self.appwrite_project_id: str = os.getenv("APPWRITE_PROJECT_ID", "").strip()

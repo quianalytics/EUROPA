@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List
 
 
 class StorageService:
@@ -20,8 +20,15 @@ class StorageService:
             json.dump(payload, output, indent=2)
         return filename
 
-    def write_csv(self, job_id: str, rows: List[Dict[str, Any]], base_name: str = "overthecap-teams") -> str:
-        filename = f"{base_name}-{job_id}.csv"
+    def write_csv(
+        self,
+        job_id: str,
+        rows: List[Dict[str, Any]],
+        base_name: str = "overthecap-teams",
+        filename: str | None = None,
+    ) -> str:
+        artifact_name = filename if filename else f"{base_name}-{job_id}.csv"
+        path = self.live_data_dir / artifact_name
         path = self.live_data_dir / filename
 
         fieldnames = self._collect_fieldnames(rows)
@@ -32,11 +39,9 @@ class StorageService:
                 normalized = {}
                 for field in fieldnames:
                     value = row.get(field, "")
-                    if isinstance(value, (dict, list)):
-                        value = json.dumps(value)
                     normalized[field] = value
                 writer.writerow(normalized)
-        return filename
+        return artifact_name
 
     def read_binary(self, filename: str, artifact_dir: str) -> bytes:
         base_dir = self.live_data_dir if artifact_dir == "live_data" else self.upload_dir
@@ -52,8 +57,6 @@ class StorageService:
     def _collect_fieldnames(rows: List[Dict[str, Any]]) -> List[str]:
         ordered = [
             "team_name",
-            "source_page",
-            "source",
             "table_index",
             "row_index",
             "scraped_at",
