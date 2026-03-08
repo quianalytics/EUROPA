@@ -55,6 +55,8 @@ make install
   - Body:
     - `seed_url` (optional, default `https://overthecap.com/`)
     - `max_pages` (optional)
+    - `include_player_details` (optional, default `true`)
+    - `player_detail_limit` (optional, max unique player profile pages to fetch)
     - `user_agent` (optional)
     - `async` (optional, default true)
   - Output artifact is CSV in `live_data`.
@@ -71,13 +73,31 @@ OTC one-liner (from another terminal):
 ```bash
 curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
   -H "Content-Type: application/json" \
-  -d '{"seed_url":"https://overthecap.com/","max_pages":5}'
+  -d '{"seed_url":"https://overthecap.com/","max_pages":5,"include_player_details":true}'
+```
+
+Disable player detail enrichment for a faster, salary-only run:
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
+  -H "Content-Type: application/json" \
+  -d '{"seed_url":"https://overthecap.com/","max_pages":5,"include_player_details":false}'
+```
+
+If discovery misses pages, pass exact `team_urls`:
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
+  -H "Content-Type: application/json" \
+  -d '{"team_urls":["https://overthecap.com/teams/buf/team-caps","https://overthecap.com/teams/nyj/team-caps"]}'
 ```
 
 - `GET /files`
 - `POST /files`
 - `GET /files/<filename>`
   - Generic file upload/list/download for `UPLOAD_DIR`.
+- `GET /live-data`
+  - List OTC CSV artifacts in `LIVE_DATA_DIR`.
 
 - Scheduler (cron jobs)
   - `POST /api/schedules`

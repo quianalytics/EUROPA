@@ -65,6 +65,7 @@ def create_app(settings: Settings | None = None) -> Flask:
 
         body.setdefault("type", "overthecap_team_csv")
         body.setdefault("seed_url", "https://overthecap.com/")
+        body.setdefault("include_player_details", True)
         body.setdefault("async", True)
         body.setdefault("user_agent", None)
 
@@ -115,6 +116,22 @@ def create_app(settings: Settings | None = None) -> Flask:
     def list_files():
         files = []
         for file_path in sorted(settings.upload_dir.iterdir()):
+            if not file_path.is_file():
+                continue
+            stat = file_path.stat()
+            files.append(
+                {
+                    "name": file_path.name,
+                    "size": stat.st_size,
+                    "modified_at": str(stat.st_mtime),
+                }
+            )
+        return jsonify({"files": files})
+
+    @app.get("/live-data")
+    def list_live_data():
+        files = []
+        for file_path in sorted(settings.live_data_dir.iterdir()):
             if not file_path.is_file():
                 continue
             stat = file_path.stat()

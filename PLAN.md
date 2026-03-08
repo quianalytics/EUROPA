@@ -9,6 +9,7 @@
   - `warroom_backend/scheduler/` (cron/interval schedule orchestration).
   - `warroom_backend/services/` (Appwrite + storage abstractions).
 - Entry point remains `app.py` in repo root for local execution.
+- OTC scraper now supports player-profile enrichment (`include_player_details`) with optional profile fetch cap (`player_detail_limit`) and shared profile caching per run.
 
 ## Runtime flow
 
@@ -21,6 +22,7 @@
    - OverTheCap scraper -> CSV in `LIVE_DATA_DIR` (`live_data`)
 6. OTC completion can be fetched via `/api/scrape/overthecap/teams/<job_id>/download` as gzip.
 7. Scheduler jobs (`/api/schedules`) trigger repeat calls to the same job manager pipeline.
+- OTC rows can now include flattened player fields (`player_position`, `player_age`, `player_contract`, etc., depending on site data availability) from linked player pages.
 
 ## Current files
 
@@ -45,3 +47,4 @@
 - Persist job history beyond in-memory runtime.
 - Add scraper auth/secrets management and request auth middleware.
 - Add OpenAPI/Swagger docs.
+- Add a scraper health/validation endpoint returning row-count + page discovery telemetry to speed up debugging if a scraper returns zero rows.
