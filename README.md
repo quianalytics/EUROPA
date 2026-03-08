@@ -21,10 +21,22 @@ This backend is now organized for multiple scrapers and scheduled jobs.
    - `python3 -m venv .venv`
    - `source .venv/bin/activate`
    - `pip install -r requirements.txt`
+   - or `make install`
 2. Configure:
    - `cp .env.example .env`
 3. Run:
    - `python app.py`
+   - or `make run`
+
+## Run with Make
+
+```
+make run
+# optional:
+make run PORT=5001
+make run-debug
+make install
+```
 
 ## Endpoints
 
@@ -53,6 +65,14 @@ This backend is now organized for multiple scrapers and scheduled jobs.
 
 - `GET /api/scrape/overthecap/teams/<job_id>/download`
   - Returns gzip compressed CSV artifact for OTC jobs.
+
+OTC one-liner (from another terminal):
+
+```bash
+curl -X POST http://127.0.0.1:5000/api/scrape/overthecap/teams \
+  -H "Content-Type: application/json" \
+  -d '{"seed_url":"https://overthecap.com/","max_pages":5}'
+```
 
 - `GET /files`
 - `POST /files`

@@ -29,7 +29,8 @@ def create_app(settings: Settings | None = None) -> Flask:
             "ok": True,
             "appwrite": appwrite_store.status(),
             "jobs": len(job_manager.list_jobs()),
-            "schedules": len(schedule_manager.scheduler.get_jobs()),
+            "schedules": schedule_manager.job_count(),
+            "scheduler_enabled": schedule_manager.enabled_status(),
             "timestamp": utc_now(),
         }
 
@@ -151,6 +152,8 @@ def create_app(settings: Settings | None = None) -> Flask:
     @app.post("/api/schedules")
     def create_schedule():
         body = request.get_json(silent=True) or {}
+        if not schedule_manager.enabled_status():
+            return jsonify({"error": "Scheduler unavailable. Install APScheduler."}), 503
         schedule_id = body.get("name") or ""
         trigger = body.get("trigger", "cron")
         scraper_payload = body.get("scraper_payload") or {}
@@ -184,10 +187,14 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     @app.get("/api/schedules")
     def list_schedules():
+        if not schedule_manager.enabled_status():
+            return jsonify({"error": "Scheduler unavailable. Install APScheduler.", "schedules": []}), 503
         return jsonify({"schedules": schedule_manager.list_schedules()})
 
     @app.delete("/api/schedules/<schedule_id>")
     def delete_schedule(schedule_id: str):
+        if not schedule_manager.enabled_status():
+            return jsonify({"error": "Scheduler unavailable. Install APScheduler."}), 503
         removed = schedule_manager.remove_schedule(schedule_id)
         if not removed:
             return jsonify({"error": "schedule not found"}), 404
