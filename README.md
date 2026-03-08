@@ -1,55 +1,92 @@
-# WarRoom Flask Backend
+# WarRoom Flask Backend (Structured for Multiple Scrapers)
 
-A small Flask backend that:
-- accepts scrape jobs
-- writes scraped records to Appwrite
-- stores job artifacts as JSON files
-- serves uploaded/scraped files
+This backend is now organized for multiple scrapers and scheduled jobs.
 
-## Quick start
+## Layout
 
-1. Create a virtual environment and install dependencies:
-   - `python -m venv .venv`
+- `warroom_backend/`
+  - `app.py` app factory and HTTP routes
+  - `config.py` env settings
+  - `utils.py` shared helpers
+  - `jobs/` job orchestration and in-memory job state
+  - `scheduler/` APScheduler integration for cron/interval jobs
+  - `services/` Appwrite + file storage services
+  - `scrapers/` independent scraper modules
+    - `generic.py`
+    - `overthecap.py`
+
+## Setup
+
+1. Create virtual environment and install dependencies:
+   - `python3 -m venv .venv`
    - `source .venv/bin/activate`
    - `pip install -r requirements.txt`
-2. Copy environment file:
+2. Configure:
    - `cp .env.example .env`
-   - fill Appwrite settings if needed
 3. Run:
    - `python app.py`
 
 ## Endpoints
 
 - `GET /health`
-  - health info and Appwrite readiness
+  - Returns app health and scheduler/job counts.
 
 - `POST /api/scrape`
-  - JSON body:
-    - `url` (required)
-    - `selector` (optional, default: `a`)
-    - `source` (optional)
-    - `limit` (optional)
+  - Generic scrape endpoint.
+  - Body:
+    - `type` optional (`generic` default)
+    - `url` required when `type=generic`
+    - `selector`, `limit`, `source`, `user_agent`, `async`
+
+- `POST /api/scrape/overthecap/teams`
+  - Starts the OverTheCap team salary-cap scraper.
+  - Body:
+    - `seed_url` (optional, default `https://overthecap.com/`)
+    - `max_pages` (optional)
     - `user_agent` (optional)
-    - `async` (optional, default `true`)
-  - starts a scrape job, returns `job_id`
+    - `async` (optional, default true)
+  - Output artifact is CSV in `live_data`.
 
 - `GET /api/scrape/jobs`
-  - returns all known job statuses
-
 - `GET /api/scrape/jobs/<job_id>`
-  - returns one job status including output artifact path
+  - Check async job status.
+
+- `GET /api/scrape/overthecap/teams/<job_id>/download`
+  - Returns gzip compressed CSV artifact for OTC jobs.
 
 - `GET /files`
-  - lists files in `UPLOAD_DIR`
-
 - `POST /files`
-  - multipart form upload with field `file`
-
 - `GET /files/<filename>`
-  - serves/downloads the file
+  - Generic file upload/list/download for `UPLOAD_DIR`.
+
+- Scheduler (cron jobs)
+  - `POST /api/schedules`
+    - `trigger`: `cron` or `interval`
+    - `name` optional
+    - `scraper_payload`: object passed to scraper at run time (same fields as `POST /api/scrape`)
+    - `cron`: cron args (`minute`, `hour`, `day`, `day_of_week`, ...)
+    - `interval`: interval args (`seconds`, `minutes`, `hours`, `days`, `weeks`)
+  - `GET /api/schedules`
+  - `DELETE /api/schedules/<id>`
+
+## Example schedule body
+
+```json
+{
+  "name": "daily-overthecap",
+  "trigger": "cron",
+  "scraper_payload": {
+    "type": "overthecap_team_csv",
+    "max_pages": 10
+  },
+  "cron": {
+    "hour": "3",
+    "minute": "0"
+  }
+}
+```
 
 ## Notes
 
-- The scraper stores one Appwrite document per extracted node.
-- Scraped content and Appwrite writes are best-effort in this starter version; network hiccups fail only that job, not the server.
-- Replace the default selector logic with your scraper rules as your WarRoom needs grow.
+- OTC CSV files are written to `live_data/`.
+- Download endpoint returns gzip-compressed CSV (`application/gzip`) to reduce transfer size.

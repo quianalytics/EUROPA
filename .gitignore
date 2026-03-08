@@ -4,6 +4,6 @@ __pycache__/
 *.sqlite3
 .env
 files/
-.txt
+live_data/
 .vscode/
 .DS_Store
