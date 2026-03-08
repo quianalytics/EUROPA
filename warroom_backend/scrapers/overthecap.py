@@ -122,6 +122,14 @@ class OverTheCapTeamScraper(BaseScraper):
         "player_guaranteed_cash": {"guaranteed", "guaranteed cash", "guaranteed money"},
     }
     PLAYER_NAME_FIELD_KEYS = {"player", "player_name", "name", "player name"}
+    EXCLUDED_RAW_FIELDS = {
+        "cap_dollars_by_college",
+        "cap-dollars-by-college",
+        "cap dollars by college",
+    }
+    EXCLUDED_ROW_KEYWORDS = {
+        "cap dollars by college",
+    }
 
     SCHEMA_VERSION = "salary_cap_player_v1"
 
@@ -392,6 +400,8 @@ class OverTheCapTeamScraper(BaseScraper):
             return False
 
         text = " ".join(cells).lower()
+        if any(keyword in text for keyword in self.EXCLUDED_ROW_KEYWORDS):
+            return False
         if any(keyword in text for keyword in ("totals", "total", "average", "totalling", "summary")):
             return False
         if not any(re.search(r"\d", value or "") for value in cells):
@@ -502,6 +512,10 @@ class OverTheCapTeamScraper(BaseScraper):
                 continue
 
             if self._contains_any(normalized_key, {"table", "index", "scraped"}):
+                continue
+            if normalized_key in self.EXCLUDED_RAW_FIELDS:
+                continue
+            if normalized_key.replace("_", " ") in self.EXCLUDED_RAW_FIELDS:
                 continue
 
             raw_fields[key] = self._clean_text(str(value))
