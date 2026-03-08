@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from bs4 import BeautifulSoup
@@ -49,6 +50,80 @@ class OverTheCapTeamScraper(BaseScraper):
         ("tennessee-titans", "ten"),
         ("washington-commanders", "wsh"),
     ]
+    TEAM_ABBR_TO_SLUG = {abbr: slug for slug, abbr in TEAM_FALLBACK_TEAMS}
+    TEAM_SLUG_TO_ABBR = {slug: abbr for slug, abbr in TEAM_FALLBACK_TEAMS}
+
+    MONEY_FIELDS = {
+        "base_salary": {
+            "base salary",
+            "base",
+            "base_salary",
+            "base pay",
+            "salary",
+        },
+        "prorated_bonus": {
+            "prorated bonus",
+            "prorated bonuses",
+            "prorated",
+            "proratedbonus",
+            "prorated_bonus",
+        },
+        "roster_bonus": {
+            "roster bonus",
+            "roster",
+            "roster_bonus",
+        },
+        "signing_bonus": {
+            "signing bonus",
+            "signing",
+            "signing_bonus",
+        },
+        "dead_money": {
+            "dead money",
+            "dead_money",
+            "dead",
+        },
+        "cap_hit": {
+            "cap hit",
+            "cap hit cap hit",
+            "cap_hit",
+            "hit",
+            "cap",
+            "annual cap hit",
+        },
+        "cap_number": {
+            "cap number",
+            "cap #",
+            "cap number cap#",
+            "capno",
+            "cap_number",
+        },
+        "guaranteed_cash": {
+            "guaranteed",
+            "guaranteed cash",
+            "guaranteed money",
+            "guaranteed cash total",
+            "guaranteed_cash",
+        },
+        "prorated_base": {
+            "prorated base",
+            "proratedbase",
+        },
+    }
+    PROFILE_FLOOR_FIELDS = {
+        "player_position": {"position", "pos"},
+        "player_age": {"age"},
+        "player_height": {"height"},
+        "player_weight": {"weight"},
+        "player_cap_number": {"cap number", "capnumber"},
+        "player_contract": {"contract"},
+        "player_contract_length": {"years", "contract length", "years left", "contract years"},
+        "player_salary": {"salary"},
+        "player_guaranteed_cash": {"guaranteed", "guaranteed cash", "guaranteed money"},
+    }
+    PLAYER_NAME_FIELD_KEYS = {"player", "player_name", "name", "player name"}
+
+    SCHEMA_VERSION = "salary_cap_player_v1"
 
     def run(self, params: Dict[str, Any], timeout: int) -> ScrapeResult:
         user_agent = params.get("user_agent")
@@ -279,7 +354,9 @@ class OverTheCapTeamScraper(BaseScraper):
                     key = header_keys[idx] if idx < len(header_keys) else f"column_{idx+1}"
                     mapped[key] = cell_value
 
-                player_url = self._extract_player_url(row, team_url)
+                player_url, player_name_from_link = self._extract_player_link(row, team_url)
+                if player_name_from_link:
+                    mapped["player"] = player_name_from_link
                 if include_player_details and player_url:
                     if player_detail_limit is None or len(player_cache) < player_detail_limit:
                         player_profile = self._extract_player_profile(player_url, headers, timeout, player_cache)
@@ -296,15 +373,17 @@ class OverTheCapTeamScraper(BaseScraper):
                 elif player_url:
                     mapped["player_profile_url"] = player_url
 
-                mapped.update(
-                    {
-                        "team_name": team_name_text,
-                        "table_index": table_index,
-                        "row_index": row_index,
-                        "scraped_at": utc_now(),
-                    }
+                rows.append(
+                    self._normalize_player_row(
+                        team_name_text=team_name_text,
+                        team_url=team_url,
+                        row=row,
+                        table_index=table_index,
+                        row_index=row_index,
+                        mapped_row=mapped,
+                        scraped_at=utc_now(),
+                    )
                 )
-                rows.append(mapped)
 
         return rows
 
@@ -320,7 +399,7 @@ class OverTheCapTeamScraper(BaseScraper):
 
         return True
 
-    def _extract_player_url(self, row: Tag, team_url: str) -> Optional[str]:
+    def _extract_player_link(self, row: Tag, team_url: str) -> Tuple[Optional[str], Optional[str]]:
         for anchor in row.find_all("a", href=True):
             href = anchor.get("href", "").strip()
             if not href:
@@ -332,12 +411,173 @@ class OverTheCapTeamScraper(BaseScraper):
             path = urllib.parse.urlparse(candidate).path.lower()
             label = (anchor.get_text(" ", strip=True) or "").lower()
             if "/player/" in path or "/players/" in path:
-                return candidate
+                return candidate, (anchor.get_text(" ", strip=True) or None)
             if not any(term in path for term in ("salary-cap", "team", "teams")) and " " in label:
                 # Player names are often plain text links without explicit player path.
-                return candidate
+                return candidate, (anchor.get_text(" ", strip=True) or None)
 
+        return None, None
+
+    @staticmethod
+    def _extract_text(row_value: Dict[str, Any], keys: set[str]) -> Optional[str]:
+        for key, value in row_value.items():
+            if not value:
+                continue
+            normalized = OverTheCapTeamScraper._normalize_label(str(key))
+            if any(target in normalized for target in keys):
+                text = str(value).strip()
+                if text:
+                    return text
         return None
+
+    @staticmethod
+    def _normalize_label(raw: str) -> str:
+        normalized = re.sub(r"[^a-z0-9 ]", " ", str(raw).lower())
+        return re.sub(r"\s+", " ", normalized).strip()
+
+    @staticmethod
+    def _contains_any(haystack: str, terms: set[str]) -> bool:
+        normalized = OverTheCapTeamScraper._normalize_label(haystack)
+        return any(term in normalized for term in terms)
+
+    def _normalize_player_row(
+        self,
+        team_name_text: str,
+        team_url: str,
+        row: Tag,
+        table_index: int,
+        row_index: int,
+        mapped_row: Dict[str, Any],
+        scraped_at: str,
+    ) -> Dict[str, Any]:
+        player_position = self._extract_text(mapped_row, {"position", "pos"})
+        player_age = self._extract_text(mapped_row, {"age"})
+        player_contract = self._extract_text(mapped_row, {"contract", "contract length", "years", "years left"})
+        player_name = self._clean_text(str(self._extract_text(mapped_row, self.PLAYER_NAME_FIELD_KEYS) or "").strip())
+        if not player_name:
+            player_name = self._clean_text(row.get_text(" ", strip=True).split("\n", 1)[0])
+
+        team_slug, team_abbr = self._team_identity_from_url(team_url)
+        cap_year = self._extract_year(team_name_text) or datetime.utcnow().year
+
+        normalized: Dict[str, Any] = {
+            "schema_version": self.SCHEMA_VERSION,
+            "team_name": team_name_text,
+            "team_slug": team_slug,
+            "team_abbr": team_abbr,
+            "team_page_url": team_url,
+            "cap_year": cap_year,
+            "player_name": player_name,
+            "player_position": player_position or "",
+            "player_age": player_age or "",
+            "player_contract": player_contract or "",
+            "table_index": table_index,
+            "row_index": row_index,
+            "scraped_at": scraped_at,
+        }
+
+        # Pull known player profile values.
+        for src_key, aliases in self.PROFILE_FLOOR_FIELDS.items():
+            raw_key = self._extract_text(mapped_row, aliases)
+            if raw_key is not None:
+                normalized[src_key] = raw_key
+
+        raw_fields: Dict[str, Any] = {}
+        for key, value in mapped_row.items():
+            if value is None or value == "":
+                continue
+            normalized_key = self._normalize_label(key)
+            if key == "team_name" or key == "player_profile_url" or key == "player_profile_skipped":
+                continue
+            if normalized_key.startswith("player_"):
+                continue
+
+            salary_field = self._map_salary_metric_key(key)
+            if salary_field:
+                numeric_value = self._parse_money(value)
+                if numeric_value is not None:
+                    normalized.setdefault(salary_field, numeric_value)
+                else:
+                    raw_fields[f"{salary_field}_text"] = self._clean_text(str(value))
+                continue
+
+            if self._contains_any(normalized_key, {"table", "index", "scraped"}):
+                continue
+
+            raw_fields[key] = self._clean_text(str(value))
+
+        if raw_fields:
+            normalized["raw_fields"] = raw_fields
+
+        for salary_field in self.MONEY_FIELDS:
+            normalized.setdefault(salary_field, None)
+
+        return normalized
+
+    def _extract_year(self, text: str) -> Optional[int]:
+        match = re.search(r"\b(20\d{2})\b", text or "")
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    def _team_identity_from_url(self, team_url: str) -> Tuple[str, Optional[str]]:
+        path = urllib.parse.urlparse(team_url).path.strip("/")
+        parts = [part for part in path.split("/") if part]
+        slug: Optional[str] = None
+        abbr: Optional[str] = None
+        if len(parts) >= 2 and parts[0] == "salary-cap":
+            slug = parts[1].lower()
+            abbr = self.TEAM_SLUG_TO_ABBR.get(slug)
+        elif len(parts) >= 3 and parts[0] == "teams":
+            abbr = parts[1].lower()
+            slug = self.TEAM_ABBR_TO_SLUG.get(abbr)
+        if not slug:
+            slug = path.split("/")[-1].lower().replace("team-caps", "").strip("-")
+        if not abbr:
+            abbr = self.TEAM_SLUG_TO_ABBR.get(slug)
+        return slug, abbr
+
+    def _map_salary_metric_key(self, raw_header: str) -> Optional[str]:
+        normalized = self._normalize_label(raw_header)
+        if not normalized:
+            return None
+        for canonical, aliases in self.MONEY_FIELDS.items():
+            if any(alias in normalized for alias in aliases):
+                return canonical
+        return None
+
+    @staticmethod
+    def _parse_money(value: Any) -> Optional[float]:
+        text = OverTheCapTeamScraper._clean_text(str(value))
+        if not text:
+            return None
+        if "$" not in text and "," not in text and not any(ch.isdigit() for ch in text):
+            return None
+
+        cleaned = text.replace("$", "").replace(",", "").strip()
+        cleaned = cleaned.replace("—", "").replace("-", "").strip()
+        if not cleaned:
+            return None
+
+        # Handle parenthesized negatives and trailing symbols like 'M' (million) if present.
+        multiplier = 1.0
+        if cleaned.endswith("m"):
+            cleaned = cleaned[:-1]
+            multiplier = 1_000_000.0
+        elif cleaned.endswith("mm"):
+            cleaned = cleaned[:-2]
+            multiplier = 1_000_000.0
+
+        cleaned = cleaned.strip()
+        if not cleaned:
+            return None
+        try:
+            return float(cleaned) * multiplier
+        except ValueError:
+            return None
 
     def _extract_player_profile(
         self,

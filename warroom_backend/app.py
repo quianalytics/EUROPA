@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import gzip
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
@@ -17,11 +17,37 @@ from warroom_backend.utils import utc_now
 def create_app(settings: Settings | None = None) -> Flask:
     settings = settings or Settings()
     app = Flask(__name__)
+    latest_cap_file = "live_NFL_cap_tables.csv"
+    frontend_numeric_fields = {
+        "cap_year",
+        "base_salary",
+        "prorated_bonus",
+        "roster_bonus",
+        "signing_bonus",
+        "dead_money",
+        "cap_hit",
+        "cap_number",
+        "guaranteed_cash",
+        "prorated_base",
+    }
 
     appwrite_store = AppwriteStore(settings)
     storage = StorageService(settings.upload_dir, settings.live_data_dir)
     job_manager = JobManager(appwrite_store, storage, timeout=settings.scraper_timeout)
     schedule_manager = ScheduleManager(job_manager, timezone=settings.scheduler_timezone)
+    if schedule_manager.enabled_status() and settings.auto_schedule_overthecap:
+        try:
+            schedule_manager.add_cron_schedule(
+                name="daily-overthecap",
+                scraper_payload={
+                    "type": "overthecap_team_csv",
+                    "include_player_details": True,
+                    "enable_team_fallback": True,
+                },
+                cron={"hour": "4", "minute": "0"},
+            )
+        except Exception:
+            pass
 
     @app.get("/health")
     def health() -> Dict[str, Any]:
@@ -111,6 +137,55 @@ def create_app(settings: Settings | None = None) -> Flask:
                 "Content-Length": str(len(gzipped)),
             },
         )
+
+    @app.get("/api/salary-cap/latest")
+    def get_latest_salary_cap_data():
+        if not storage.exists(latest_cap_file, artifact_dir="live_data"):
+            return jsonify({"error": f"artifact '{latest_cap_file}' not found"}), 404
+
+        path = storage.get_path(latest_cap_file, artifact_dir="live_data")
+        rows = storage.read_csv(latest_cap_file, artifact_dir="live_data", deserialize_json=True)
+
+        parsed_rows = []
+        for row in rows:
+            parsed_rows.append(_coerce_frontend_salary_row(row, frontend_numeric_fields))
+
+        return jsonify(
+            {
+                "schema": "salary_cap_player_v1",
+                "schema_version": "1.0",
+                "artifact": latest_cap_file,
+                "updated_at": str(path.stat().st_mtime),
+                "row_count": len(parsed_rows),
+                "rows": parsed_rows,
+            }
+        )
+
+    @app.get("/api/salary-cap/latest/csv")
+    def get_latest_salary_cap_csv():
+        if not storage.exists(latest_cap_file, artifact_dir="live_data"):
+            return jsonify({"error": f"artifact '{latest_cap_file}' not found"}), 404
+        gzipped = gzip.compress(storage.read_binary(latest_cap_file, artifact_dir="live_data"))
+        return Response(
+            gzipped,
+            headers={
+                "Content-Type": "application/gzip",
+                "Content-Disposition": f'attachment; filename="{latest_cap_file}.gz"',
+                "Content-Encoding": "gzip",
+                "Content-Length": str(len(gzipped)),
+            },
+        )
+
+    def _coerce_frontend_salary_row(row: Dict[str, Any], numeric_fields: Iterable[str]) -> Dict[str, Any]:
+        normalized: Dict[str, Any] = {}
+        for key, value in row.items():
+            if key in numeric_fields:
+                normalized[key] = _coerce_float(value)
+            elif key == "raw_fields" and isinstance(value, (dict, list)):
+                normalized[key] = value
+            else:
+                normalized[key] = value
+        return normalized
 
     @app.get("/files")
     def list_files():
@@ -218,6 +293,33 @@ def create_app(settings: Settings | None = None) -> Flask:
         return jsonify({"status": "removed", "id": schedule_id}), 200
 
     return app
+
+
+def _coerce_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, str):
+        text = value.strip()
+    else:
+        text = str(value).strip()
+
+    if not text:
+        return None
+
+    lowered = text.lower()
+    if lowered in {"n/a", "na", "none", "-", "--", "—", "null"}:
+        return None
+
+    cleaned = text.replace(",", "").replace("$", "").strip()
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
 
 
 app = create_app()

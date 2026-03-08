@@ -18,6 +18,7 @@ class Settings:
         self.upload_dir: Path = Path(os.getenv("UPLOAD_DIR", "./files")).resolve()
         self.live_data_dir: Path = Path(os.getenv("LIVE_DATA_DIR", "./live_data")).resolve()
         self.scheduler_timezone: str = os.getenv("SCHEDULER_TIMEZONE", "America/New_York")
+        self.auto_schedule_overthecap: bool = self._to_bool_env(os.getenv("AUTO_SCHEDULE_OVERTHECAP", "true"))
 
         self.appwrite_endpoint: str = os.getenv("APPWRITE_ENDPOINT", "").strip()
         self.appwrite_project_id: str = os.getenv("APPWRITE_PROJECT_ID", "").strip()
@@ -36,3 +37,7 @@ class Settings:
             "database_id": self.appwrite_database_id,
             "collection_id": self.appwrite_collection_id,
         }
+
+    @staticmethod
+    def _to_bool_env(value: str | None) -> bool:
+        return str(value or "").lower() in {"1", "true", "yes", "y", "on"}
